@@ -2,6 +2,9 @@
 
 The Ouijatari interface bench, published to GitHub Pages behind a passphrase.
 
+**New to the project? Start with [docs/HANDOFF.md](docs/HANDOFF.md).**
+AI coding agents should read [AGENTS.md](AGENTS.md) first.
+
 ## How the protection works
 
 GitHub Pages serves static files with no server-side authentication, so the
@@ -40,6 +43,10 @@ behind Cloudflare Access or an equivalent proxy instead.
 | `tools/plates.mjs` | Plate vector → outline, silhouette metrics and connection points. |
 | `tools/wall.mjs` | Gallery model → unfolded walls and nail lattice. |
 | `tools/test.mjs` | Tests for all of the above. |
+| `AGENTS.md`, `CLAUDE.md` | Instructions for AI coding agents. |
+| `docs/HANDOFF.md` | Where the project stands, and how to continue it. |
+| `docs/ARCHITECTURE.md` | The boundaries between the parts, and the data that crosses them. |
+| `docs/next/` | A guide for each of the next phases. |
 
 Requires Node 18+. There are no dependencies.
 Rebuilding `src/data.js` additionally needs `mutool` (`brew install mupdf`).
