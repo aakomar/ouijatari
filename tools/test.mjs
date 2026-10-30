@@ -10,14 +10,13 @@
 // it with tools/decrypt.mjs). Those tests are reported as skipped otherwise.
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { webcrypto } from "node:crypto";
 import assert from "node:assert/strict";
 import { encrypt, decrypt } from "./lib.mjs";
 import { inline, extract } from "./bundle.mjs";
-import { parsePathData, plateFromSvg, simplifyRing, plateIdFromFilename } from "./plates.mjs";
+import { parsePathData, plateFromSvg, simplifyRing, plateIdFromFilename, insideRings } from "./plates.mjs";
 import { parseWall } from "./wall.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -145,6 +144,9 @@ test("a plate is measured in inches about the artboard centre", () => {
   assert.equal(p.density, 1);
   assert.equal(p.branches, 1);
   assert.ok(Math.abs(p.elongation - 2) < 0.01, `elongation ${p.elongation}`);
+  // A bar's two ends are its connection points, each pointing outward.
+  assert.deepEqual(p.points, [[1, 0, 90], [-1, 0, 270]]);
+  assert.ok(insideRings(parsePathData(p.d), p.rule, ...p.hang), "the hang point is on the metal");
 });
 
 test("simplifying drops collinear points and keeps corners", () => {
@@ -206,12 +208,38 @@ const SRC = join(root, "src");
 const srcReady = ["index.html", "engine.js", "data.js"].every((f) => existsSync(join(SRC, f)));
 const srcTest = (name, fn) => (srcReady ? test(name, fn) : skipped.push(name));
 
+// The page's scripts run as functions of the globals they use, so that their
+// global lookups stay as fast as in a browser (a vm context slows them badly).
+const run = (code, globals) => new Function(...Object.keys(globals), code)(...Object.values(globals));
+
 async function loadEngine() {
-  const ctx = vm.createContext({ window: {} });
-  for (const f of ["data.js", "engine.js"]) vm.runInContext(await readFile(join(SRC, f), "utf8"), ctx);
-  const O = ctx.window.Ouijatari;
-  return { O, E: O.createEngine(ctx.window.OUIJATARI_DATA), data: ctx.window.OUIJATARI_DATA };
+  const window = {};
+  for (const f of ["data.js", "engine.js"]) run(await readFile(join(SRC, f), "utf8"), { window });
+  const O = window.Ouijatari;
+  return { O, E: O.createEngine(window.OUIJATARI_DATA), data: window.OUIJATARI_DATA };
 }
+
+// Exhibitions are costly to grow, so each seed is grown once and shared.
+const grown = new Map();
+async function exhibition(seed) {
+  const { O, E } = await loadEngine();
+  if (!grown.has(seed)) grown.set(seed, E.grow(Array.isArray(seed) ? seed : O.seedReadings(seed, O.DAYS)));
+  return { O, E, run: grown.get(seed) };
+}
+
+// A decided plate's outline and connection points in wall coordinates.
+function placed(d) {
+  const a = (d.rotation * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  const at = ([x, y]) => [c * x - s * y + d.x, s * x + c * y + d.y];
+  return { rings: parsePathData(d.plate.d).map((r) => r.map(at)), points: d.plate.points.map(at) };
+}
+const segmentDistance = (p, a, b) => {
+  const dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+};
+const edgeDistance = (rings, p) =>
+  Math.min(...rings.flatMap((r) => r.map((q, i) => segmentDistance(p, r[(i || r.length) - 1], q))));
 
 srcTest("the catalog holds 75 plates in each of four families", async () => {
   const { data } = await loadEngine();
@@ -221,53 +249,149 @@ srcTest("the catalog holds 75 plates in each of four families", async () => {
   assert.equal(new Set(data.plates.map((p) => p.id)).size, 300);
 });
 
-srcTest("a full exhibition installs 157 distinct plates on 157 distinct nails", async () => {
-  const { O, E } = await loadEngine();
-  for (const seed of ["#B4642A", "#000000", "#FFFFFF", "#3366CC"]) {
-    const run = E.grow(O.seedReadings(seed, O.DAYS));
-    assert.equal(run.length, 157);
-    assert.equal(new Set(run.map((d) => d.plate.id)).size, 157, "a plate repeated");
-    assert.equal(new Set(run.map((d) => d.nail)).size, 157, "a nail was used twice");
-    assert.ok(run.every((d) => E.nails[d.nail]), "a plate is off the wall");
-    assert.ok(run.every((d) => d.rotation % 15 === 0 && d.rotation >= 0 && d.rotation < 360));
+srcTest("every plate has connection points on its edge and a hang point on its metal", async () => {
+  const { data } = await loadEngine();
+  for (const p of data.plates) {
+    const rings = parsePathData(p.d);
+    assert.ok(p.points.length >= 2, `${p.id} has fewer than two connection points`);
+    for (const [x, y, dir] of p.points) {
+      assert.ok(edgeDistance(rings, [x, y]) < 0.05, `${p.id}: point ${x},${y} is off the outline`);
+      assert.ok(Number.isInteger(dir) && dir >= 0 && dir < 360, `${p.id}: bad direction ${dir}`);
+    }
+    assert.ok(insideRings(rings, p.rule, ...p.hang), `${p.id}: hang point is off the metal`);
   }
 });
 
-srcTest("every plate after the first connects to the existing mass", async () => {
-  const { O, E } = await loadEngine();
-  const run = E.grow(O.seedReadings("#B4642A", O.DAYS));
+const SEEDS = ["#B4642A", "#000000", "#FFFFFF", "#3366CC", "#12CC88"];
+
+srcTest("a full exhibition installs 157 distinct plates, each on its own nail", async () => {
+  for (const seed of SEEDS) {
+    const { E, run } = await exhibition(seed);
+    assert.equal(run.length, 157);
+    assert.equal(new Set(run.map((d) => d.plate.id)).size, 157, "a plate repeated");
+    const nails = run.filter((d) => d.nail !== null).map((d) => d.nail);
+    assert.equal(new Set(nails).size, nails.length, "a nail was used twice");
+    // The lattice has no nail at a corner, so a plate touching one to open the
+    // next wall may be carried by its joints.
+    assert.ok(run.every((d) => d.nail !== null || d.blocked || d.touch), "a plate went unnailed on an unblocked day");
+    assert.ok(run.every((d) => d.rotation >= 0 && d.rotation < 360));
+    for (const d of run) {
+      if (d.nail === null) continue;
+      const { rings } = placed(d), n = E.nails[d.nail];
+      const onMetal = insideRings(rings, d.plate.rule, n.u, n.y);
+      assert.ok(onMetal || edgeDistance(rings, [n.u, n.y]) <= 1 + 1e-9, `day ${d.day}: nail ${n.id} is not under the plate`);
+    }
+  }
+});
+
+srcTest("every plate after the first meets the mass at its connection points", async () => {
+  const { E, run } = await exhibition("#B4642A");
   assert.equal(run[0].nail, E.origin);
   assert.equal(run[0].parent, null);
   for (const d of run.slice(1)) {
+    assert.ok(d.joins.length >= 1, `day ${d.day} touches nothing`);
     assert.ok(d.parent && d.parent.day < d.day, `day ${d.day} has no earlier parent`);
-    const a = E.nails[d.nail], b = E.nails[d.parent.nail];
-    const steps = Math.max(Math.abs(a.col - b.col), Math.abs(a.row - b.row));
-    assert.equal(steps, d.kind === "long-range bridge" ? 2 : 1, `day ${d.day} is not beside its parent`);
+    const mine = placed(d);
+    for (const j of d.joins) {
+      assert.ok(Math.hypot(mine.points[j.point][0] - j.x, mine.points[j.point][1] - j.y) <= 0.15,
+        `day ${d.day}: its point ${j.point + 1} is not at the joint`);
+      for (const w of j.with) {
+        const theirs = placed(w.decision);
+        const gap = w.point === null ? edgeDistance(theirs.rings, [j.x, j.y])
+          : Math.hypot(theirs.points[w.point][0] - j.x, theirs.points[w.point][1] - j.y);
+        assert.ok(gap <= 0.15, `day ${d.day}: ${w.decision.plate.id} is ${gap.toFixed(2)} in from the joint`);
+      }
+    }
+  }
+});
+
+// Rasterises every plate on a quarter-inch grid and counts, for each pair,
+// the cells both cover away from the joints, where branch ends may meet.
+srcTest("plates touch but never lie on one another", async () => {
+  const STEP = 0.25, CONTACT = 0.75;
+  for (const seed of ["#B4642A", "#3366CC"]) {
+    const { E, run } = await exhibition(seed);
+    const W = Math.ceil(E.wall.width / STEP), owner = new Int16Array(W * Math.ceil(E.wall.height / STEP)).fill(-1);
+    const joints = run.flatMap((d) => d.joins.map((j) => [j.x, j.y]));
+    const overlaps = new Map();
+    run.forEach((d, k) => {
+      const { rings } = placed(d), ys = rings.flat().map((p) => p[1]);
+      for (let r = Math.floor(Math.min(...ys) / STEP); r * STEP < Math.max(...ys); r++) {
+        const y = (r + 0.5) * STEP, xs = [];
+        const xsAll = rings.flat().map((p) => p[0]);
+        for (let c = Math.floor(Math.min(...xsAll) / STEP); c * STEP < Math.max(...xsAll); c++) xs.push(c);
+        for (const c of xs) {
+          const x = (c + 0.5) * STEP;
+          if (!insideRings(rings, d.plate.rule, x, y)) continue;
+          const other = owner[r * W + c];
+          if (other >= 0 && !joints.some(([jx, jy]) => Math.hypot(jx - x, jy - y) <= CONTACT)) {
+            const key = other + ":" + k;
+            overlaps.set(key, (overlaps.get(key) || 0) + 1);
+          }
+          owner[r * W + c] = k;
+        }
+      }
+    });
+    for (const [key, cells] of overlaps) {
+      const [a, b] = key.split(":").map(Number);
+      assert.ok(cells <= 4, `${seed}: days ${run[a].day} and ${run[b].day} overlap by ${cells} cells`);
+    }
+  }
+});
+
+srcTest("the composition spreads onto all three walls, each plate flat on one", async () => {
+  for (const seed of SEEDS) {
+    const { E, run } = await exhibition(seed);
+    const counts = E.wall.walls.map((w) => run.filter((d) => {
+      const xs = placed(d).rings.flat().map((p) => p[0]);
+      return Math.min(...xs) >= w.u - 0.15 && Math.max(...xs) <= w.u + w.length + 0.15;
+    }).length);
+    assert.equal(counts.reduce((a, b) => a + b), 157, `${seed}: a plate folds round a corner`);
+    assert.ok(counts.filter((n) => n > 0).length >= 2, `${seed}: the composition never left the centre wall (${counts.join("/")})`);
+  }
+  const reached = await Promise.all(SEEDS.map(async (seed) => {
+    const { E, run } = await exhibition(seed);
+    return E.wall.walls.every((w) => run.some((d) => d.x >= w.u && d.x < w.u + w.length));
+  }));
+  assert.ok(reached.filter(Boolean).length >= SEEDS.length - 1, "most exhibitions should reach every wall");
+});
+
+srcTest("a plate opening a corner touches the corner line with its metal", async () => {
+  const { E, run } = await exhibition("#B4642A");
+  const corners = E.wall.walls.slice(1).map((w) => w.u);
+  const touches = run.filter((d) => d.touch);
+  assert.ok(touches.length >= 1, "no plate touched a corner");
+  for (const d of touches) {
+    assert.ok(corners.includes(d.touch.x), `day ${d.day}: touch off the corner line`);
+    const { rings } = placed(d);
+    assert.ok(edgeDistance(rings, [d.touch.x, d.touch.y]) <= 0.15, `day ${d.day}: the metal does not reach the corner`);
   }
 });
 
 srcTest("each phase only creates the relationships it has unlocked", async () => {
-  const { O, E } = await loadEngine();
-  for (const d of E.grow(O.seedReadings("#12CC88", O.DAYS)).slice(1)) {
+  const { O, run } = await exhibition("#12CC88");
+  for (const d of run.slice(1)) {
     assert.equal(d.blocked, false, `day ${d.day} was blocked`);
     assert.ok(O.permittedKinds(d.phase).includes(d.kind), `day ${d.day}: ${d.kind} in phase ${d.phase.n}`);
   }
 });
 
 srcTest("the same readings grow the same wall", async () => {
-  const { O, E } = await loadEngine();
+  const { O, E, run } = await exhibition("#B4642A");
   const readings = O.seedReadings("#B4642A", O.DAYS);
-  const key = (run) => run.map((d) => [d.plate.id, d.nail, d.rotation, d.relation].join("|")).join("\n");
-  assert.equal(key(E.grow(readings)), key(E.grow([...readings])));
+  const key = (r) => r.map((d) => [d.plate.id, d.nail, d.x.toFixed(6), d.y.toFixed(6), d.rotation.toFixed(6), d.relation].join("|")).join("\n");
+  assert.equal(key(E.grow([...readings])), key(run));
+  // Days kept from an earlier run are reinstalled exactly as they were decided.
+  assert.equal(key(E.grow(readings, run.slice(0, 80))), key(run));
   // A decision depends only on the readings up to its day.
   const changed = [...readings];
   changed[100] = "#00FF00";
-  assert.equal(key(E.grow(changed).slice(0, 100)), key(E.grow(readings).slice(0, 100)));
+  assert.equal(key(E.grow(changed, run.slice(0, 100)).slice(0, 100)), key(run.slice(0, 100)));
+  assert.notEqual(key(E.grow(changed, run.slice(0, 100)).slice(100)), key(run.slice(100)));
 });
 
 srcTest("an exhausted family hands over to the next one instead of repeating", async () => {
-  const { O, E } = await loadEngine();
-  const run = E.grow(Array(O.DAYS).fill("#B4642A"));
+  const { run } = await exhibition(Array(157).fill("#B4642A"));
   assert.equal(new Set(run.map((d) => d.plate.id)).size, 157);
   assert.equal(run.filter((d) => d.family === "A").length, 75);
   assert.ok(run.every((d) => d.familyRequested === "A"));
@@ -299,23 +423,28 @@ srcTest("the page script renders day 157 without error", async () => {
   const nodes = new Map();
   const document = element();
   document.querySelector = (sel) => nodes.get(sel) || nodes.set(sel, element()).get(sel);
-  const ctx = vm.createContext({ window: {}, document, navigator: {}, setTimeout, setInterval, clearInterval });
-  for (const f of ["data.js", "engine.js"]) vm.runInContext(await readFile(join(SRC, f), "utf8"), ctx);
-  vm.runInContext(script[1], ctx);
+  const window = { addEventListener() {} };
+  for (const f of ["data.js", "engine.js"]) run(await readFile(join(SRC, f), "utf8"), { window });
+  run(script[1], { window, document, navigator: {}, setTimeout, setInterval, clearInterval });
 
   const written = (sel, prop = "innerHTML") => String(nodes.get(sel)[prop]);
+  assert.ok(!/NaN|undefined/.test(written("#fieldPlates")), "the field marks have no size");
   assert.equal((written("#plateDefsList").match(/<path /g) || []).length, 300);
   assert.equal((written("#fieldStatic").match(/class="nail"/g) || []).length, 594);
   assert.equal((written("#fieldPlates").match(/<use /g) || []).length, 157);
+  assert.ok((written("#fieldPlates").match(/class="joint"/g) || []).length >= 1, "today's joints are marked");
   assert.equal((written("#archiveGrid").match(/class="thumb"/g) || []).length, 300);
   assert.match(written("#msg"), /Day 157[\s\S]*Mounting point:<\/span> Nail [A-I]-\d\d, /);
+  assert.match(written("#msg"), /Attachment point:<\/span> point \d+ to [ACGT]_[\w]+ point \d+, [\d.]+ in (left|right) and [\d.]+ in (above|below) Nail [A-I]-\d\d/);
   assert.equal(written("#cands").match(/<tr/g).length, 6);
-  const O = ctx.window.Ouijatari;
+  const O = window.Ouijatari;
   assert.equal((written("#permitted").match(/<li>/g) || []).length, O.permittedKinds(O.PHASES.at(-1)).length);
   assert.equal(nodes.get("#dayThumb").style.left, "100%");
   assert.equal(nodes.has("#params"), false, "the satellite parameters panel is gone");
-  assert.equal(JSON.parse(written("#archive", "textContent")).growth_field_state.length, 156);
-  assert.ok(!/undefined|NaN/.test(written("#msg") + written("#fcap", "textContent") + written("#trace") + written("#platefig")));
+  const record = JSON.parse(written("#archive", "textContent"));
+  assert.equal(record.growth_field_state.length, 156);
+  assert.ok(record.connection_points.length >= 1);
+  assert.ok(!/undefined|NaN|null/.test(written("#msg") + written("#fcap", "textContent") + written("#trace") + written("#platefig")));
 });
 
 let failed = 0;

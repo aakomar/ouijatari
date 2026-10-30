@@ -1,6 +1,7 @@
 // Plate geometry: turns one plate's SVG (as produced by `mutool draw -F svg`
 // from the artist's Illustrator file) into a catalog entry — a simplified
-// outline in wall units plus the silhouette metrics the brief asks for.
+// outline in wall units, the silhouette metrics the brief asks for, the
+// connection points where it can meet other plates, and its hang point.
 //
 // Everything here is a pure function of its input, so the catalog is
 // reproducible and the functions are testable without the source artwork.
@@ -8,8 +9,9 @@
 // Units: Illustrator works in points, 72 to the inch. The catalog is in inches,
 // the unit of the SketchUp wall model, with y pointing down and the origin at
 // the centre of the artboard. The artboard is the plate's reference frame: its
-// upward direction is the plate's designated top, and its centre is the
-// mounting point (see "Plate and wall data" in README.md).
+// upward direction is the plate's designated top, and its centre is the point
+// a plate's position on the wall is given by (see "Plate and wall data" in
+// README.md).
 
 export const POINTS_PER_INCH = 72;
 // Outline tolerance. The source outlines are pixel traces with sub-point
@@ -243,6 +245,100 @@ function countBranches(ring, hullScale) {
   return pockets < 2 ? pockets + 1 : pockets;
 }
 
+// Connection points are the ends of the plate's branches: the places where one
+// plate can meet another. The artwork does not mark them, so they are read off
+// the main outline. A branch end is where the outline folds back on itself:
+// walking CONNECTION_ARC_IN along the outline either way from it lands on two
+// points much closer together than the walk, on a convex turn.
+const CONNECTION_ARC_IN = 1.5;
+const CONNECTION_FOLD = 0.45; // chord over walked length; lower folds back harder
+const CONNECTION_STEP_IN = 0.1;
+
+function resampleRing(ring, step) {
+  const out = [];
+  let carry = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    let t = carry;
+    for (; t < len; t += step) out.push([a[0] + ((b[0] - a[0]) * t) / len, a[1] + ((b[1] - a[1]) * t) / len]);
+    carry = t - len;
+  }
+  return out;
+}
+
+// Returns the connection points as [x, y, direction], numbered clockwise from
+// the designated top about the frame's origin. The direction is the way the
+// branch points at its end, in degrees clockwise from up. There are always at
+// least two points.
+export function connectionPoints(rings) {
+  const main = rings.reduce((m, r) => (Math.abs(signedArea(r)) > Math.abs(signedArea(m)) ? r : m));
+  const turn = Math.sign(signedArea(main));
+  const p = resampleRing(main, CONNECTION_STEP_IN), n = p.length;
+  const k = Math.round(CONNECTION_ARC_IN / CONNECTION_STEP_IN);
+  const fold = p.map((q, i) => {
+    const a = p[(i - k + n) % n], b = p[(i + k) % n];
+    const cross = (q[0] - a[0]) * (b[1] - q[1]) - (q[1] - a[1]) * (b[0] - q[0]);
+    return Math.sign(cross) === turn ? Math.hypot(b[0] - a[0], b[1] - a[1]) / (2 * CONNECTION_ARC_IN) : Infinity;
+  });
+  const points = [];
+  for (let i = 0; i < n; i++) {
+    if (!(fold[i] <= CONNECTION_FOLD)) continue;
+    // Keep only the sharpest fold within one walk either side; the first of a tie.
+    let best = true;
+    for (let d = -k; d <= k && best; d++) {
+      const j = (i + d + n) % n;
+      if (d && (fold[j] < fold[i] || (fold[j] === fold[i] && j < i))) best = false;
+    }
+    if (best) points.push(i);
+  }
+  // A plate too blunt to fold anywhere still has ends: the farthest-apart points.
+  const gap = (a, b) => Math.hypot(p[a][0] - p[b][0], p[a][1] - p[b][1]);
+  const farthestFrom = (a) => p.reduce((f, _, i) => (gap(a, i) > gap(a, f) ? i : f), a);
+  if (!points.length) points.push(farthestFrom(farthestFrom(0)));
+  if (points.length < 2) points.push(farthestFrom(points[0]));
+  // The branch's direction at its end: from the middle of the walk back to the tip.
+  const direction = (i) => {
+    const a = p[(i - k + n) % n], b = p[(i + k) % n];
+    const dx = p[i][0] - (a[0] + b[0]) / 2, dy = p[i][1] - (a[1] + b[1]) / 2;
+    return Math.round(((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360) % 360;
+  };
+  const clockwiseFromTop = (q) => (Math.atan2(q[0], -q[1]) + 2 * Math.PI) % (2 * Math.PI);
+  return points
+    .map((i) => [round(p[i][0], 2) || 0, round(p[i][1], 2) || 0, direction(i)])
+    .sort((a, b) => clockwiseFromTop(a) - clockwiseFromTop(b));
+}
+
+// The best place to hang the plate: the filled point farthest from any edge,
+// sampled on a STEP_IN grid. A nail through it has the most metal around it.
+export function hangPoint(rings, rule, step = 0.1) {
+  const pts = rings.flat();
+  const [x0, x1] = [Math.min(...pts.map((q) => q[0])), Math.max(...pts.map((q) => q[0]))];
+  const [y0, y1] = [Math.min(...pts.map((q) => q[1])), Math.max(...pts.map((q) => q[1]))];
+  let best = null, depth = -1;
+  for (let y = y0 + step / 2; y < y1; y += step) {
+    for (let x = x0 + step / 2; x < x1; x += step) {
+      if (!insideRings(rings, rule, x, y)) continue;
+      let d = Infinity;
+      for (const r of rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) d = Math.min(d, distToSegment([x, y], r[j], r[i]));
+      if (d > depth) { depth = d; best = [x, y]; }
+    }
+  }
+  return [round(best[0], 2) || 0, round(best[1], 2) || 0];
+}
+
+export function insideRings(rings, rule, x, y) {
+  let wind = 0, crossings = 0;
+  for (const r of rings) {
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xa, ya] = r[j], [xb, yb] = r[i];
+      if ((ya <= y) === (yb <= y)) continue;
+      if (xa + ((y - ya) / (yb - ya)) * (xb - xa) > x) { crossings++; wind += yb > ya ? 1 : -1; }
+    }
+  }
+  return rule === "evenodd" ? crossings % 2 === 1 : wind !== 0;
+}
+
 const round = (v, places) => Number(v.toFixed(places));
 
 // The measurable characteristics the brief lists that a silhouette alone can
@@ -293,6 +389,8 @@ export function plateFromSvg(svg, { id, family, source }) {
     id, family, source,
     ...measure(rings, sil.rule),
     rule: sil.rule,
+    points: connectionPoints(rings),
+    hang: hangPoint(rings, sil.rule),
     d: toPathData(rings),
   };
 }
