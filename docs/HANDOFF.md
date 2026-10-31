@@ -47,10 +47,12 @@ It does this in steps:
 
 These are private and are never put in this repository, because the repository is public.
 The bench page and its code are public on purpose: anyone with the link can open it.
+The three files arrive together as a download link; put them in your `ouijatari` folder (see "One-time setup"), where git already ignores them.
 
 | Item | What it is | Needed for |
 |---|---|---|
 | `spec.md` | The artist's full brief: the whole system, the timeline, the people involved. | Understanding what to build. Give it to your assistant. |
+| `tech_spec.md` | The technical scope sent to developers: the components, the timeline to a first working version by January 31, 2027, and the questions on cost and availability. | Planning the remaining work. Give it to your assistant. |
 | `space_and_plates/` | The artist's original vector files and the gallery model (several hundred megabytes). | Only for rebuilding the plate catalog if the artwork changes. |
 | Access to the GitHub repository | Permission to push changes. | Publishing. |
 
@@ -67,7 +69,7 @@ Ask your assistant to walk you through these steps if any of them are unfamiliar
    git clone https://github.com/grandballoon/ouijatari.git
    cd ouijatari
    ```
-4. Put `spec.md` in the `ouijatari` folder.
+4. Put `spec.md`, `tech_spec.md` and the `space_and_plates` folder in the `ouijatari` folder.
 5. Open the page: double-click `index.html`, or run `open index.html` on a Mac.
 6. Check everything works:
    ```sh
@@ -90,12 +92,12 @@ Then:
 - **Save often.** Ask it to commit when a step works. A commit is a saved checkpoint you can return to.
 - **Publishing is a separate, deliberate step.** Pushing to GitHub updates the public page within a minute or two. The assistant will ask before it pushes.
 
-If you use a plain chat window instead, upload `AGENTS.md`, this file, `docs/ARCHITECTURE.md`, the guide for your current phase, `spec.md`, and whichever of `engine.js` or `index.html` you are changing.
+If you use a plain chat window instead, upload `AGENTS.md`, this file, `docs/ARCHITECTURE.md`, the guide for your current phase, `spec.md`, `tech_spec.md`, and whichever of `engine.js` or `index.html` you are changing.
 
 ### Three things never to do
 
 1. Never paste an API key, a password or a phone number into a file in this folder, or into a public place.
-2. Never commit `spec.md` or `space_and_plates/`. The repository is set up to prevent this; do not override it.
+2. Never commit `spec.md`, `tech_spec.md` or `space_and_plates/`. The repository is set up to prevent this; do not override it.
 3. Never edit `data.js` by hand. It is generated.
 
 ## The road ahead
