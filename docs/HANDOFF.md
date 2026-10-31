@@ -66,7 +66,7 @@ Ask your assistant to walk you through these steps if any of them are unfamiliar
    A plain chat window works too, but you will have to upload files by hand and copy its changes back.
 3. Download the repository:
    ```sh
-   git clone https://github.com/grandballoon/ouijatari.git
+   git clone https://github.com/aakomar/ouijatari.git
    cd ouijatari
    ```
 4. Put `spec.md`, `tech_spec.md` and the `space_and_plates` folder in the `ouijatari` folder.

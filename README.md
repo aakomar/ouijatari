@@ -1,6 +1,6 @@
 # ouijatari
 
-The Ouijatari interface bench, published openly on GitHub Pages at <https://grandballoon.github.io/ouijatari/>.
+The Ouijatari interface bench, published openly on GitHub Pages at <https://aakomar.github.io/ouijatari/>.
 
 **New to the project? Start with [docs/HANDOFF.md](docs/HANDOFF.md).**
 AI coding agents should read [AGENTS.md](AGENTS.md) first.
