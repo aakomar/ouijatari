@@ -8,16 +8,16 @@ This phase needs the choices from [phase 1](1-choose-inputs.md) and its saved sa
 
 ## Opening prompt for your assistant
 
-> Read AGENTS.md, docs/HANDOFF.md, docs/ARCHITECTURE.md (especially "Input seam: the reading"), docs/inputs.md, docs/next/2-build-the-reading.md, spec.md, and src/engine.js.
+> Read AGENTS.md, docs/HANDOFF.md, docs/ARCHITECTURE.md (especially "Input seam: the reading"), docs/inputs.md, docs/next/2-build-the-reading.md, spec.md, and engine.js.
 > We are in phase 2: building the reading from real data.
 > Start by showing me, in plain language, how today's colour becomes a reading and which parts of the reading the growth rules actually use.
 > Then propose a plan for the first step only, and wait for my go-ahead.
 
 ## Where the colour picker sits today
 
-In the page (`src/index.html`) the "Source reading" panel holds a colour field, a hue slider and a hex box.
+In the page (`index.html`) the "Source reading" panel holds a colour field, a hue slider and a hex box.
 Whatever colour it holds becomes the reading for the day in view.
-In the engine (`src/engine.js`), `read(hex)` turns that colour into a reading, and `decide` calls `read` for each day.
+In the engine (`engine.js`), `read(hex)` turns that colour into a reading, and `decide` calls `read` for each day.
 
 The engine only uses eight fields of the reading: the family (`sector.fam`), four targets for the plate's shape, the growth `energy`, the direction (`params.bias`) and the preferred `rotation`.
 `docs/ARCHITECTURE.md` lists them with their ranges.
@@ -61,7 +61,7 @@ Do it from history, fixed in advance:
 
 - Collect a few months of past data for each source (phase 1 asked for this to be possible).
 - From it, compute a fixed calibration: for example, the value at each percentile.
-- Store the calibration in a file in `src/` and **never change it once the exhibition opens.**
+- Store the calibration in a file beside `engine.js` and **never change it once the exhibition opens.**
   If it changed, replaying the archive would grow a different wall.
 
 A value is then placed on 0 to 1 by where it falls in that history.
@@ -93,15 +93,15 @@ Two practical constraints, which the assistant should check by running whole exh
   Long runs of near-identical days can force the rules to give way (the decision is marked as blocked).
   `README.md` explains when that happens.
 
-Put the mapping in one small pure function in its own file (for example `src/reading.js`, loaded by `src/index.html` with `<script src="reading.js"></script>`, which the encryption tools then bundle automatically).
-Keep its weights in a table at the top, the way `DIMS` and the `W_` constants sit at the top of `src/engine.js`, so the artist can ask for adjustments without anyone hunting through the code.
+Put the mapping in one small pure function in its own file (for example `reading.js`, loaded by `index.html` with `<script src="reading.js"></script>` and by the tests the way they load `engine.js`).
+Keep its weights in a table at the top, the way `DIMS` and the `W_` constants sit at the top of `engine.js`, so the artist can ask for adjustments without anyone hunting through the code.
 
 The reading must also carry a display colour (`hex`), since the page draws each day's plate in its reading's colour.
 Ask the artist what that colour should express.
 
 ### 5. Teach the engine to take a reading
 
-Today `decide` in `src/engine.js` takes a colour and calls `read` itself.
+Today `decide` in `engine.js` takes a colour and calls `read` itself.
 Change it so it accepts either a colour, as now, or a ready-made reading.
 The colour path must keep working: the page's picker becomes the manual override the brief asks for, and every existing test must still pass.
 
@@ -135,4 +135,4 @@ Add the best of these sequences to the tests, so future changes cannot silently 
 - [ ] The engine accepts a reading object, and colours still grow exactly the same wall.
 - [ ] The page grows from real readings, and the picker still overrides a day.
 - [ ] Several historical 157-day runs grow without errors, and the artist has seen them.
-- [ ] `node tools/test.mjs` passes, `src/` has been re-encrypted with `node tools/encrypt.mjs`, and nothing private is committed.
+- [ ] `node tools/test.mjs` passes, and nothing private is committed.

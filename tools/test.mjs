@@ -1,122 +1,19 @@
 #!/usr/bin/env node
 // Run: node tools/test.mjs
 //
-// Crypto: the browser decryptor in tools/gate.html must agree with the Node
-// encryptor in tools/lib.mjs. These are two independent implementations of the
-// same format, so a change to one that is not mirrored in the other would ship
-// an undecryptable page.
 // Data: the plate and wall converters, on small synthetic inputs.
-// Engine and page: the real src/, when it is present (it is gitignored; get
-// it with tools/decrypt.mjs). Those tests are reported as skipped otherwise.
+// Engine and page: the real engine.js, data.js and index.html.
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { webcrypto } from "node:crypto";
 import assert from "node:assert/strict";
-import { encrypt, decrypt } from "./lib.mjs";
-import { inline, extract } from "./bundle.mjs";
 import { parsePathData, plateFromSvg, simplifyRing, plateIdFromFilename, insideRings } from "./plates.mjs";
 import { parseWall } from "./wall.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const gate = await readFile(join(root, "tools", "gate.html"), "utf8");
-
-// Lift the shipped functions out of gate.html so the browser code itself is
-// under test, not a re-typed copy of it.
-function lift(name) {
-  const re = new RegExp(`\\n  (?:async )?function ${name}\\([\\s\\S]*?\\n  \\}`);
-  const found = gate.match(re);
-  assert.ok(found, `could not extract ${name}() from tools/gate.html`);
-  return found[0];
-}
-
-function browserDecryptorFor(payload) {
-  const body = `
-    const crypto = arguments[0], atob = arguments[1], PAYLOAD = arguments[2];
-    ${lift("b64")}
-    ${lift("decrypt")}
-    return decrypt;
-  `;
-  return new Function(body)(
-    webcrypto,
-    (s) => Buffer.from(s, "base64").toString("binary"),
-    payload
-  );
-}
-
-const PASSWORD = "correct horse battery staple";
-// Multi-byte and HTML-significant characters, to catch encoding mistakes.
-const FIXTURE = '<!doctype html><p>Ouijatari — plate #184, 90° · "overlap" & <b>grow</b> ☉</p>';
 
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
-const skipped = [];
-
-test("gate.html still has its payload placeholder", () => {
-  assert.ok(gate.includes("__PAYLOAD__"), "tools/gate.html lost __PAYLOAD__");
-});
-
-test("browser decrypts what Node encrypts", async () => {
-  const payload = await encrypt(FIXTURE, PASSWORD);
-  assert.equal(await browserDecryptorFor(payload)(PASSWORD), FIXTURE);
-});
-
-test("browser rejects a wrong passphrase", async () => {
-  const payload = await encrypt(FIXTURE, PASSWORD);
-  await assert.rejects(() => browserDecryptorFor(payload)("nope"));
-});
-
-test("Node round-trips its own output", async () => {
-  const payload = await encrypt(FIXTURE, PASSWORD);
-  assert.equal(await decrypt(payload, PASSWORD), FIXTURE);
-});
-
-test("each encryption uses a fresh salt and IV", async () => {
-  const [a, b] = await Promise.all([
-    encrypt(FIXTURE, PASSWORD),
-    encrypt(FIXTURE, PASSWORD),
-  ]);
-  assert.notEqual(a.kdf.salt, b.kdf.salt, "salt must not repeat");
-  assert.notEqual(a.iv, b.iv, "IV must not repeat");
-  assert.notEqual(a.ct, b.ct, "ciphertext must not repeat");
-});
-
-test("tampered ciphertext is rejected", async () => {
-  const payload = await encrypt(FIXTURE, PASSWORD);
-  const raw = Buffer.from(payload.ct, "base64");
-  raw[0] ^= 0xff;
-  payload.ct = raw.toString("base64");
-  await assert.rejects(() => decrypt(payload, PASSWORD), "GCM must reject a forged payload");
-});
-
-test("payload is safe to inline in a <script> tag", async () => {
-  const payload = await encrypt(FIXTURE, PASSWORD);
-  const json = JSON.stringify(payload);
-  assert.ok(!json.includes("</"), "payload must not contain a tag terminator");
-});
-
-/* ---------- bundling ---------- */
-
-const PAGE = '<!doctype html><script src="data.js"></script>\n<script src="engine.js"></script>\n<script>go()</script>';
-const SCRIPTS = { "data.js": "window.D = {a:1};\n", "engine.js": "// engine\nconst x = '<b>';" };
-
-test("inline folds local scripts in and extract restores them exactly", async () => {
-  const bundled = await inline(PAGE, async (name) => SCRIPTS[name]);
-  assert.ok(!/<script src=/.test(bundled), "no external script may survive bundling");
-  const { html, files } = extract(bundled);
-  assert.equal(html, PAGE);
-  assert.deepEqual(Object.fromEntries(files), SCRIPTS);
-});
-
-test("inline refuses a script that would close its own tag", async () => {
-  await assert.rejects(() => inline(PAGE, async () => 'x = "</script>"'));
-});
-
-test("a page with no local scripts passes through both ways", async () => {
-  assert.equal(await inline(FIXTURE, async () => ""), FIXTURE);
-  assert.equal(extract(FIXTURE).html, FIXTURE);
-});
 
 /* ---------- plate conversion ---------- */
 
@@ -202,11 +99,8 @@ test("walls unfold left to right as seen from inside the room", () => {
   assert.ok(!w.nails.some((n) => n.col === 5));
 });
 
-/* ---------- engine and page (need src/) ---------- */
+/* ---------- engine and page ---------- */
 
-const SRC = join(root, "src");
-const srcReady = ["index.html", "engine.js", "data.js"].every((f) => existsSync(join(SRC, f)));
-const srcTest = (name, fn) => (srcReady ? test(name, fn) : skipped.push(name));
 
 // The page's scripts run as functions of the globals they use, so that their
 // global lookups stay as fast as in a browser (a vm context slows them badly).
@@ -214,7 +108,7 @@ const run = (code, globals) => new Function(...Object.keys(globals), code)(...Ob
 
 async function loadEngine() {
   const window = {};
-  for (const f of ["data.js", "engine.js"]) run(await readFile(join(SRC, f), "utf8"), { window });
+  for (const f of ["data.js", "engine.js"]) run(await readFile(join(root, f), "utf8"), { window });
   const O = window.Ouijatari;
   return { O, E: O.createEngine(window.OUIJATARI_DATA), data: window.OUIJATARI_DATA };
 }
@@ -241,7 +135,7 @@ const segmentDistance = (p, a, b) => {
 const edgeDistance = (rings, p) =>
   Math.min(...rings.flatMap((r) => r.map((q, i) => segmentDistance(p, r[(i || r.length) - 1], q))));
 
-srcTest("the catalog holds 75 plates in each of four families", async () => {
+test("the catalog holds 75 plates in each of four families", async () => {
   const { data } = await loadEngine();
   const count = {};
   for (const p of data.plates) count[p.family] = (count[p.family] || 0) + 1;
@@ -249,7 +143,7 @@ srcTest("the catalog holds 75 plates in each of four families", async () => {
   assert.equal(new Set(data.plates.map((p) => p.id)).size, 300);
 });
 
-srcTest("every plate has connection points on its edge and a hang point on its metal", async () => {
+test("every plate has connection points on its edge and a hang point on its metal", async () => {
   const { data } = await loadEngine();
   for (const p of data.plates) {
     const rings = parsePathData(p.d);
@@ -264,7 +158,7 @@ srcTest("every plate has connection points on its edge and a hang point on its m
 
 const SEEDS = ["#B4642A", "#000000", "#FFFFFF", "#3366CC", "#12CC88"];
 
-srcTest("a full exhibition installs 157 distinct plates, each on its own nail", async () => {
+test("a full exhibition installs 157 distinct plates, each on its own nail", async () => {
   for (const seed of SEEDS) {
     const { E, run } = await exhibition(seed);
     assert.equal(run.length, 157);
@@ -284,7 +178,7 @@ srcTest("a full exhibition installs 157 distinct plates, each on its own nail", 
   }
 });
 
-srcTest("every plate after the first meets the mass at its connection points", async () => {
+test("every plate after the first meets the mass at its connection points", async () => {
   const { E, run } = await exhibition("#B4642A");
   assert.equal(run[0].nail, E.origin);
   assert.equal(run[0].parent, null);
@@ -307,7 +201,7 @@ srcTest("every plate after the first meets the mass at its connection points", a
 
 // Rasterises every plate on a quarter-inch grid and counts, for each pair,
 // the cells both cover away from the joints, where branch ends may meet.
-srcTest("plates touch but never lie on one another", async () => {
+test("plates touch but never lie on one another", async () => {
   const STEP = 0.25, CONTACT = 0.75;
   for (const seed of ["#B4642A", "#3366CC"]) {
     const { E, run } = await exhibition(seed);
@@ -339,7 +233,7 @@ srcTest("plates touch but never lie on one another", async () => {
   }
 });
 
-srcTest("the composition spreads onto all three walls, each plate flat on one", async () => {
+test("the composition spreads onto all three walls, each plate flat on one", async () => {
   for (const seed of SEEDS) {
     const { E, run } = await exhibition(seed);
     const counts = E.wall.walls.map((w) => run.filter((d) => {
@@ -356,7 +250,7 @@ srcTest("the composition spreads onto all three walls, each plate flat on one", 
   assert.ok(reached.filter(Boolean).length >= SEEDS.length - 1, "most exhibitions should reach every wall");
 });
 
-srcTest("a plate opening a corner touches the corner line with its metal", async () => {
+test("a plate opening a corner touches the corner line with its metal", async () => {
   const { E, run } = await exhibition("#B4642A");
   const corners = E.wall.walls.slice(1).map((w) => w.u);
   const touches = run.filter((d) => d.touch);
@@ -368,7 +262,7 @@ srcTest("a plate opening a corner touches the corner line with its metal", async
   }
 });
 
-srcTest("each phase only creates the relationships it has unlocked", async () => {
+test("each phase only creates the relationships it has unlocked", async () => {
   const { O, run } = await exhibition("#12CC88");
   for (const d of run.slice(1)) {
     assert.equal(d.blocked, false, `day ${d.day} was blocked`);
@@ -376,7 +270,7 @@ srcTest("each phase only creates the relationships it has unlocked", async () =>
   }
 });
 
-srcTest("the same readings grow the same wall", async () => {
+test("the same readings grow the same wall", async () => {
   const { O, E, run } = await exhibition("#B4642A");
   const readings = O.seedReadings("#B4642A", O.DAYS);
   const key = (r) => r.map((d) => [d.plate.id, d.nail, d.x.toFixed(6), d.y.toFixed(6), d.rotation.toFixed(6), d.relation].join("|")).join("\n");
@@ -390,7 +284,7 @@ srcTest("the same readings grow the same wall", async () => {
   assert.notEqual(key(E.grow(changed, run.slice(0, 100)).slice(100)), key(run.slice(100)));
 });
 
-srcTest("an exhausted family hands over to the next one instead of repeating", async () => {
+test("an exhausted family hands over to the next one instead of repeating", async () => {
   const { run } = await exhibition(Array(157).fill("#B4642A"));
   assert.equal(new Set(run.map((d) => d.plate.id)).size, 157);
   assert.equal(run.filter((d) => d.family === "A").length, 75);
@@ -402,10 +296,10 @@ srcTest("an exhausted family hands over to the next one instead of repeating", a
 
 // Runs the page's own script against a stand-in DOM that accepts anything and
 // remembers what was written to it, with every optional panel present.
-srcTest("the page script renders day 157 without error", async () => {
-  const html = await readFile(join(SRC, "index.html"), "utf8");
+test("the page script renders day 157 without error", async () => {
+  const html = await readFile(join(root, "index.html"), "utf8");
   const script = html.match(/<script>([\s\S]*?)<\/script>/);
-  assert.ok(script, "src/index.html has no inline script");
+  assert.ok(script, "index.html has no inline script");
   const element = () => {
     const store = {};
     return new Proxy(function () {}, {
@@ -424,7 +318,7 @@ srcTest("the page script renders day 157 without error", async () => {
   const document = element();
   document.querySelector = (sel) => nodes.get(sel) || nodes.set(sel, element()).get(sel);
   const window = { addEventListener() {} };
-  for (const f of ["data.js", "engine.js"]) run(await readFile(join(SRC, f), "utf8"), { window });
+  for (const f of ["data.js", "engine.js"]) run(await readFile(join(root, f), "utf8"), { window });
   run(script[1], { window, document, navigator: {}, setTimeout, setInterval, clearInterval });
 
   const written = (sel, prop = "innerHTML") => String(nodes.get(sel)[prop]);
@@ -457,7 +351,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${process.env.TRACE ? err.stack : err.message}`);
   }
 }
-for (const name of skipped) console.log(`  skip ${name}`);
-console.log(`\n${tests.length - failed}/${tests.length} passed` +
-  (skipped.length ? `, ${skipped.length} skipped (no src/ — run tools/decrypt.mjs or tools/build-data.mjs)` : ""));
+console.log(`\n${tests.length - failed}/${tests.length} passed`);
 process.exit(failed ? 1 : 0);

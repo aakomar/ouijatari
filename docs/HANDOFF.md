@@ -25,7 +25,7 @@ It does this in steps:
 - The model of the gallery walls and the nail grid, from the SketchUp model.
 - Every growth rule: families, plate matching, the four phases, joining plates at their branch ends, spreading across all three walls, crossing corners, and what to do when the rules leave nowhere to go.
 - A web page (the "bench") that runs the whole exhibition, lets you scrub through all 157 days, draws the wall, and shows the technician's message and the archive record for any day.
-- 26 automated tests, all passing.
+- 16 automated tests, all passing.
 
 **Stand-ins, waiting for the next phases:**
 
@@ -46,10 +46,10 @@ It does this in steps:
 ## What you will receive separately
 
 These are private and are never put in this repository, because the repository is public.
+The bench page and its code are public on purpose: anyone with the link can open it.
 
 | Item | What it is | Needed for |
 |---|---|---|
-| The passphrase | Unlocks the code and the published page. Keep it in a password manager; if it is lost, the code cannot be recovered. | Everything. |
 | `spec.md` | The artist's full brief: the whole system, the timeline, the people involved. | Understanding what to build. Give it to your assistant. |
 | `space_and_plates/` | The artist's original vector files and the gallery model (several hundred megabytes). | Only for rebuilding the plate catalog if the artwork changes. |
 | Access to the GitHub repository | Permission to push changes. | Publishing. |
@@ -67,17 +67,13 @@ Ask your assistant to walk you through these steps if any of them are unfamiliar
    git clone https://github.com/grandballoon/ouijatari.git
    cd ouijatari
    ```
-4. Unlock the code (it asks for the passphrase and shows nothing as you type):
-   ```sh
-   node tools/decrypt.mjs
-   ```
-5. Put `spec.md` in the `ouijatari` folder.
-6. Open the page: double-click `src/index.html`, or run `open src/index.html` on a Mac.
-7. Check everything works:
+4. Put `spec.md` in the `ouijatari` folder.
+5. Open the page: double-click `index.html`, or run `open index.html` on a Mac.
+6. Check everything works:
    ```sh
    node tools/test.mjs
    ```
-   It should end with `26/26 passed` (or more, as tests are added).
+   It should end with `16/16 passed` (or more, as tests are added).
 
 ## Working with your assistant
 
@@ -92,16 +88,15 @@ Then:
 - **Look at the result yourself.** Open the page and check it makes sense to you. You know what the exhibition should look like; the assistant does not.
 - **Let it run the tests.** If any test fails, the step is not finished.
 - **Save often.** Ask it to commit when a step works. A commit is a saved checkpoint you can return to.
-- **Publishing is a separate, deliberate step.** Pushing to GitHub updates the public page. The assistant will ask before it pushes.
-- **After changing the page,** you run `node tools/encrypt.mjs` yourself before committing, because it needs the passphrase.
+- **Publishing is a separate, deliberate step.** Pushing to GitHub updates the public page within a minute or two. The assistant will ask before it pushes.
 
-If you use a plain chat window instead, upload `AGENTS.md`, this file, `docs/ARCHITECTURE.md`, the guide for your current phase, `spec.md`, and whichever of `src/engine.js` or `src/index.html` you are changing.
+If you use a plain chat window instead, upload `AGENTS.md`, this file, `docs/ARCHITECTURE.md`, the guide for your current phase, `spec.md`, and whichever of `engine.js` or `index.html` you are changing.
 
 ### Three things never to do
 
-1. Never paste the passphrase, an API key or a password into a file in this folder, or into a public place.
-2. Never commit `src/`, `spec.md` or `space_and_plates/`. The repository is set up to prevent this; do not override it.
-3. Never edit `src/data.js` or the top-level `index.html` by hand. They are generated.
+1. Never paste an API key, a password or a phone number into a file in this folder, or into a public place.
+2. Never commit `spec.md` or `space_and_plates/`. The repository is set up to prevent this; do not override it.
+3. Never edit `data.js` by hand. It is generated.
 
 ## The road ahead
 
@@ -135,8 +130,8 @@ Technical choices with a sensible default (file formats, code structure, test de
 |---|---|
 | **Reading** | One day's data, turned into the numbers the rules use. Today it comes from a colour. |
 | **Decision** | The software's answer for one day: plate, position, angle, relationship, and the reasons. |
-| **Engine** | `src/engine.js`, the file that holds every growth rule. |
-| **Catalog** | The measured list of all 300 plates, in `src/data.js`. |
+| **Engine** | `engine.js`, the file that holds every growth rule. |
+| **Catalog** | The measured list of all 300 plates, in `data.js`. |
 | **Growth Field** | The composition on the wall. |
 | **Connection point** | A place on a plate where it can meet another plate: the tip of a branch. |
 | **Phase** | One of the four stretches of the exhibition; each unlocks new kinds of relationship between plates. |

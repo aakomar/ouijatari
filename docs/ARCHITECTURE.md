@@ -35,19 +35,18 @@ The next phases (in `docs/next/`) fill in both ends.
 
 | File | Role | Core or shell |
 |---|---|---|
-| `src/engine.js` | Every growth rule: reading → family → plate → position → orientation → relationship. | Core. Pure. |
-| `src/data.js` | Generated plate catalog (300 plates) and wall model (3 walls, nail lattice). | Data. |
-| `src/index.html` | The bench page: colour picker, day slider, wall drawing, message, archive record. | Shell, but it also composes the message and record (see "Known debts"). |
+| `engine.js` | Every growth rule: reading → family → plate → position → orientation → relationship. | Core. Pure. |
+| `data.js` | Generated plate catalog (300 plates) and wall model (3 walls, nail lattice). | Data. |
+| `index.html` | The bench page: colour picker, day slider, wall drawing, message, archive record. | Shell, but it also composes the message and record (see "Known debts"). |
 | `tools/plates.mjs`, `tools/wall.mjs` | Turn the artist's vector files and the gallery model into catalog entries and the wall. | Core. Pure. |
-| `tools/build-data.mjs` | Runs those over `space_and_plates/` and writes `src/data.js`. | Shell. |
-| `tools/encrypt.mjs`, `tools/decrypt.mjs`, `tools/lib.mjs`, `tools/bundle.mjs`, `tools/gate.html` | Encrypt `src/` into the published `index.html`, and back. | Shell around a small pure crypto core. |
-| `tools/test.mjs` | Every test. Engine tests run only when `src/` is present. | Tests. |
+| `tools/build-data.mjs` | Runs those over `space_and_plates/` and writes `data.js`. | Shell. |
+| `tools/test.mjs` | Every test. | Tests. |
 
-`src/` is private and gitignored; see `AGENTS.md`, rule 3.
+The page runs straight from these files, from disk or from GitHub Pages, with no build step.
 
 ## The engine's public interface
 
-`src/engine.js` puts one object on the page (`window.Ouijatari`), or on `globalThis` under Node:
+`engine.js` puts one object on the page (`window.Ouijatari`), or on `globalThis` under Node:
 
 ```js
 const O = Ouijatari;
@@ -69,7 +68,7 @@ Other exports: `DAYS` (157), `SECTORS`, `PHASES`, `DIMS`, `read`, `seedReadings`
 
 This is the place the colour picker occupies today, and the place real data will plug in.
 
-`read(hex)` in `src/engine.js` turns one day's input into a reading.
+`read(hex)` in `engine.js` turns one day's input into a reading.
 The engine depends on only these fields of it:
 
 | Field | Range | What the rules do with it |
@@ -91,7 +90,7 @@ The page also shows these fields, so a reading built from real data should keep 
 | `params.amplitude`, `params.variability`, `params.frequency`, `params.occupancy`, `params.vibration` | The processed parameters in the decision trace and the archive record. |
 | `h`, `s`, `v`, `r`, `g`, `b`, `sector.name` | Picker and trace details. These belong to the colour stand-in and can be dropped or replaced once the page shows real data. |
 
-Today these all come from the colour: hue picks the family, saturation is amplitude, brightness is occupancy, and so on (see `read` in `src/engine.js`).
+Today these all come from the colour: hue picks the family, saturation is amplitude, brightness is occupancy, and so on (see `read` in `engine.js`).
 That mapping is a stand-in with no artistic meaning.
 Phase 2 replaces it with a mapping from real measurements, and the artist decides what that mapping should mean.
 
@@ -123,9 +122,9 @@ Each decision returned by `grow` has these fields:
 
 The page turns a decision into three things a person reads:
 
-- **The technician's message**: `messageLines` and `plainMessage` in `src/index.html`.
+- **The technician's message**: `messageLines` and `plainMessage` in `index.html`.
   It matches the sample in the brief: day, plate, mounting point, parent, attachment point, relationship, orientation, diagram reference.
-- **The archive record**: `renderRecord` in `src/index.html`.
+- **The archive record**: `renderRecord` in `index.html`.
   A JSON object with the raw data, processed parameters, candidates and scores, selection reason, the state of the wall before the day, position, joins, orientation and an `installation_confirmed` flag.
   Its fields follow the brief's list of what the daily archive must record.
 - **The diagram**: the Growth Field drawing and the plate figure, drawn as SVG in the page.
@@ -136,7 +135,7 @@ These are places where the code does not yet follow its own design.
 Each is called out in the phase guide that should fix it.
 
 - **The message and the record are composed in the page.**
-  They are pure functions of a decision, but they live in `src/index.html` beside the rendering code, so nothing outside a browser can produce them.
+  They are pure functions of a decision, but they live in `index.html` beside the rendering code, so nothing outside a browser can produce them.
   Phase 3 moves them, and the diagram drawing, into a pure module that both the page and a daily job can use.
 - **The reading is welded to a colour.**
   `decide` calls `read(hex)` itself.
@@ -144,16 +143,16 @@ Each is called out in the phase guide that should fix it.
 - **There is no persistent state.**
   The page recomputes everything from its readings each time it loads and stores nothing.
   Phase 3 adds the daily log, installation confirmations and backups.
-- **The plaintext code cannot live in this repository.**
-  A daily job that runs the engine needs `src/engine.js` and `src/data.js` unencrypted.
-  Phase 3 discusses where that job and its data should live.
+- **This repository is public, and the daily job's data is not.**
+  The job can reuse `engine.js` and `data.js` from here, but its settings, keys and log must live somewhere private.
+  Phase 3 discusses where.
 
 ## Assumptions baked into the data
 
 Listed in full in `README.md`; repeated here because each is a question for the artist.
 
 - **Connection points** are guessed from the outlines as the ends of each plate's branches (`tools/plates.mjs`).
-- **Mounting**: a plate hangs on one nail under its metal, or one its edge rests against within an inch (`src/engine.js`).
+- **Mounting**: a plate hangs on one nail under its metal, or one its edge rests against within an inch (`engine.js`).
 - **Designated top** is the upward direction of each artboard.
 - **Plate IDs** are the source file names, which are irregular (`A_`, `A_01`, `C_0` sit beside `A_8_12`).
 - **Oxidation, colour and brightness** are missing from the catalog; they need photographs of the finished plates.

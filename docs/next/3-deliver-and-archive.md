@@ -51,8 +51,8 @@ The brief's rules for missed days follow from this:
 
 ### 1. Move composing out of the page
 
-Today the message (`messageLines`, `plainMessage`), the archive record (`renderRecord`) and the diagram drawing are written inside `src/index.html`, so nothing outside a browser can produce them.
-Move them into a pure module, for example `src/report.js`, that takes a decision and returns the message text, the record and the diagram.
+Today the message (`messageLines`, `plainMessage`), the archive record (`renderRecord`) and the diagram drawing are written inside `index.html`, so nothing outside a browser can produce them.
+Move them into a pure module, for example `report.js`, that takes a decision and returns the message text, the record and the diagram.
 The page then uses that module too, so the screen and the sent message can never disagree.
 Add tests: a known decision gives exactly the expected message and record.
 
@@ -62,12 +62,13 @@ Converting one to the other is a technical decision for the assistant; it should
 
 ### 2. Decide where the daily job runs and where its data lives
 
-This is the most important technical decision in the phase, and it is constrained by one fact: **this repository is public, so the daily job's code, data and log cannot live in it in plain form.**
+This is the most important technical decision in the phase, and it is constrained by one fact: **this repository is public, so the daily job's settings, keys, data and log cannot live in it.**
+The job can reuse the engine from here; only its private side needs a home.
 
 | Option | What it means | For | Against |
 |---|---|---|---|
-| Make this repository private | Stop encrypting, keep the code in plain form, host the bench page somewhere with access control. | One place for everything; far simpler to work with; no passphrase dance. | Free GitHub Pages hosting needs a public repository, so the bench page moves (for example to a host with login protection, which `README.md` mentions). |
-| A second, private repository for operations | This one stays the public bench; the private one holds the daily job, the packages and the log. | Leaves the existing setup untouched. | Two copies of the engine that must be kept identical. |
+| A second, private repository for operations | This one stays the public bench and the home of the engine; the private one holds the daily job, its settings, the packages and the log, and takes the engine from here. | The public page stays exactly as it is; the private data is cleanly separate. | Two repositories to look after; the job must pick up engine changes from this one. |
+| Make this repository private | Everything in one private place. | One repository. | Free GitHub Pages needs a public repository, so the bench page would need a paid GitHub plan or a different host. |
 | A computer at the museum | The brief's museum-side Raspberry Pi runs the job and keeps the log. | Matches the brief; works through internet cuts for sending once the connection returns. | One machine to keep alive; backups must leave the building. |
 
 Whichever is chosen, the job needs to run on a schedule on something that is always on: a small computer at the museum or the remote site, or a scheduled cloud service.
